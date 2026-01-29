@@ -10666,140 +10666,69 @@ service cloud.firestore {
                     console.log('⚠️ لا يمكن قراءة المستخدمين من Firestore بسبب قواعد الأمان');
                 }
                 
-                // ثانياً: التحقق من وجود المستخدم في Authentication
-                // نتحقق من المستخدم الحالي أولاً
+                // ثانياً: التحقق من وجود المستخدم في Authentication دون تسجيل دخول تلقائي
+                // (تسجيل الدخول التلقائي يسمح لأي زائر بالدخول كمستخدم أول - نمنع ذلك)
                 let firstUserExistsInAuth = false;
                 const currentAuthUser = window.auth?.currentUser;
                 
                 if (currentAuthUser && currentAuthUser.email === firstUserEmail) {
-                    // المستخدم مسجل دخول بالفعل
+                    // المستخدم مسجل دخول بالفعل كمستخدم أول
                     firstUserExistsInAuth = true;
                     console.log('✅ المستخدم الأول مسجل دخول بالفعل:', firstUserEmail);
-                } else {
-                    // محاولة تسجيل الدخول للتحقق من وجود المستخدم في Authentication
-                    try {
-                        await window.signInWithEmailAndPassword(window.auth, firstUserEmail, firstUserPassword);
-                        firstUserExistsInAuth = true;
-                        console.log('✅ المستخدم الأول موجود في Authentication:', firstUserEmail);
-                    } catch (authError) {
-                        if (authError.code === 'auth/user-not-found') {
-                            console.log('ℹ️ المستخدم غير موجود في Authentication - سيتم إنشاؤه');
-                            firstUserExistsInAuth = false;
-                        } else if (authError.code === 'auth/wrong-password') {
-                            console.log('⚠️ كلمة المرور غير صحيحة - المستخدم موجود لكن كلمة المرور خاطئة');
-                            // لا ننشئ مستخدم جديد إذا كانت كلمة المرور خاطئة
-                            return;
-                        } else {
-                            console.log('ℹ️ خطأ في التحقق من Authentication:', authError.code);
-                            // نستمر في محاولة إنشاء المستخدم
-                            firstUserExistsInAuth = false;
-                        }
-                    }
                 }
                 
-                // إذا كان المستخدم موجوداً في Authentication
+                // إذا كان المستخدم موجوداً في Authentication ومسجّل دخوله، لا نغيّر شيء
                 if (firstUserExistsInAuth) {
-                    // إذا كان موجوداً في Authentication، نتحقق من Firestore
                     if (!firstUserExistsInFirestore) {
-                        console.log('⚠️ المستخدم موجود في Authentication لكن غير موجود في Firestore - سيتم إنشاء السجل');
-                        // سيتم إنشاء السجل في ensureUserRecordExists
+                        console.log('⚠️ المستخدم موجود في Authentication لكن غير موجود في Firestore - سيتم إنشاء السجل عند ensureUserRecordExists');
                     }
-                    
-                    // المستخدم موجود، لا حاجة لإنشائه
                     return;
                 }
                 
-                // إذا لم يكن المستخدم موجوداً في Authentication، قم بإنشاءه
-                if (!firstUserExistsInAuth) {
-                    console.log('لا يوجد مستخدم في Authentication - جاري إنشاء المستخدم الأول...');
-                    
-                    try {
-                        // إنشاء المستخدم في Firebase Authentication
-                        const userCredential = await window.createUserWithEmailAndPassword(
-                            window.auth, 
-                            firstUserEmail, 
-                            firstUserPassword
-                        );
-                        const userId = userCredential.user.uid;
-
-                        // بعد إنشاء المستخدم في Authentication، يصبح مسجل دخول تلقائياً
-                        // لذا يمكننا الآن إنشاء المستند في Firestore
-                        // انتظار قليلاً للتأكد من أن Authentication تم تحديثه
-                        await new Promise(resolve => setTimeout(resolve, 500));
-
-                        // حفظ بيانات المستخدم في Firestore
-                        const userData = {
-                            name: 'المستخدم الأول',
-                            email: firstUserEmail,
-                            role: 'admin',
-                            status: 'active',
-                            active: true,
-                            isFirstAdmin: true,
-                            createdAt: window.firestore.serverTimestamp(),
-                            createdBy: 'system'
-                        };
-
-                        await window.firestore.setDoc(
-                            window.firestore.doc(window.db, 'users', userId),
-                            userData
-                        );
-
-                        console.log('✅ تم إنشاء المستخدم الأول بنجاح!');
-                        console.log('📧 البريد الإلكتروني:', firstUserEmail);
-                        console.log('🔑 كلمة المرور:', firstUserPassword);
-                        console.log('👤 User ID:', userId);
-                        
-                        // تحديث currentUser
-                        currentUser = userCredential.user;
-                        
-                        alert('✅ تم إنشاء المستخدم الأول بنجاح!\n\nالبريد: ' + firstUserEmail + '\nكلمة المرور: ' + firstUserPassword);
-                    } catch (error) {
-                        console.error('❌ خطأ في إنشاء المستخدم الأول:', error);
-                        // قد يكون المستخدم موجوداً بالفعل في Authentication
-                        if (error.code === 'auth/email-already-in-use') {
-                            console.log('ℹ️ المستخدم موجود بالفعل في Authentication - جاري تسجيل الدخول...');
-                            // محاولة تسجيل الدخول للتحقق
-                            try {
-                                const userCredential = await window.signInWithEmailAndPassword(window.auth, firstUserEmail, firstUserPassword);
-                                console.log('✅ تم تسجيل الدخول بنجاح');
-                                
-                                // التحقق من وجود المستخدم في Firestore وإنشاء السجل إذا لم يكن موجوداً
-                                const userId = userCredential.user.uid;
-                                const userDoc = await window.firestore.getDoc(
-                                    window.firestore.doc(window.db, 'users', userId)
-                                );
-                                
-                                if (!userDoc.exists()) {
-                                    console.log('⚠️ المستخدم غير موجود في Firestore - جاري إنشاء السجل...');
-                                    const userData = {
-                                        name: 'المستخدم الأول',
-                                        email: firstUserEmail,
-                                        role: 'admin',
-                                        status: 'active',
-                                        active: true,
-                                        isFirstAdmin: true,
-                                        createdAt: window.firestore.serverTimestamp(),
-                                        createdBy: 'system'
-                                    };
-                                    
-                                    await window.firestore.setDoc(
-                                        window.firestore.doc(window.db, 'users', userId),
-                                        userData
-                                    );
-                                    console.log('✅ تم إنشاء سجل المستخدم في Firestore');
-                                } else {
-                                    console.log('✅ المستخدم موجود في Firestore');
-                                }
-                                
-                                // تحديث currentUser
-                                currentUser = userCredential.user;
-                            } catch (loginError) {
-                                console.error('❌ خطأ في تسجيل الدخول:', loginError);
-                            }
-                        } else {
-                            console.error('❌ خطأ غير متوقع:', error);
-                        }
+                // التحقق من الوجود بمحاولة الإنشاء (بدون تسجيل دخول تلقائي للزائر)
+                console.log('التحقق من وجود المستخدم الأول (بدون تسجيل دخول تلقائي)...');
+                try {
+                    const userCredential = await window.createUserWithEmailAndPassword(
+                        window.auth,
+                        firstUserEmail,
+                        firstUserPassword
+                    );
+                    const userId = userCredential.user.uid;
+                    // المستخدم لم يكن موجوداً وتم إنشاؤه - ننشئ السجل في Firestore ثم نخرجه ليظهر نموذج تسجيل الدخول
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const userData = {
+                        name: 'المستخدم الأول',
+                        email: firstUserEmail,
+                        role: 'admin',
+                        status: 'active',
+                        active: true,
+                        isFirstAdmin: true,
+                        createdAt: window.firestore.serverTimestamp(),
+                        createdBy: 'system'
+                    };
+                    await window.firestore.setDoc(
+                        window.firestore.doc(window.db, 'users', userId),
+                        userData
+                    );
+                    console.log('✅ تم إنشاء المستخدم الأول بنجاح!');
+                    alert('✅ تم إنشاء المستخدم الأول بنجاح!\n\nالبريد: ' + firstUserEmail + '\nكلمة المرور: ' + firstUserPassword + '\n\nسيتم إظهار نافذة تسجيل الدخول.');
+                    // تسجيل الخروج فوراً حتى يظهر نموذج تسجيل الدخول ولا يدخل الزائر تلقائياً
+                    if (window.signOut && window.auth) {
+                        await window.signOut(window.auth);
+                        currentUser = null;
                     }
+                    return;
+                } catch (error) {
+                    if (error.code === 'auth/email-already-in-use') {
+                        // المستخدم الأول موجود مسبقاً - لا نُسجّل دخولاً تلقائياً، نترك الزائر يرى نموذج تسجيل الدخول
+                        console.log('✅ المستخدم الأول موجود مسبقاً في Authentication - نافذة تسجيل الدخول ستظهر للزائر');
+                        return;
+                    }
+                    if (error.code === 'auth/invalid-email' || error.code === 'auth/weak-password') {
+                        console.warn('⚠️ بيانات المستخدم الأول غير صالحة:', error.code);
+                        return;
+                    }
+                    console.error('❌ خطأ في التحقق/إنشاء المستخدم الأول:', error);
                 }
             } catch (error) {
                 console.error('❌ خطأ في التحقق من المستخدم الأول:', error);
@@ -11807,23 +11736,18 @@ service cloud.firestore {
                         }
                         
                         if (!shouldSplitLeave) {
-                            // تحويل نوع الإجازة إلى بدون راتب (للرصيد السالب أو الصفر)
-                            originalType = 'hourly'; // حفظ النوع الأصلي
+                            // الإجازة الزمنية تبقى زمنية (type: hourly) مع علامة بدون راتب (isUnpaidHourly)
+                            originalType = 'hourly';
                             leaveTypeSelect.setAttribute('data-original-type', 'hourly');
-                            leaveTypeSelect.value = 'unpaid';
-                            type = 'unpaid';
+                            leaveTypeSelect.setAttribute('data-is-unpaid-hourly', 'true');
+                            // لا نغيّر type إلى unpaid؛ تبقى 'hourly'
                             
                             // إظهار خيار الخصم عند التحويل إلى بدون راتب
                             const leaveDeductionGroup = document.getElementById('leaveDeductionGroup');
                             if (leaveDeductionGroup) {
                                 leaveDeductionGroup.style.display = 'block';
                             }
-                            
-                            // إخفاء حقل الساعات عند التحويل إلى بدون راتب
-                            const leaveHoursGroup = document.getElementById('leaveHoursGroup');
-                            if (leaveHoursGroup) {
-                                leaveHoursGroup.style.display = 'none';
-                            }
+                            // حقل الساعات يبقى ظاهراً لأن الإجازة زمنية
                         }
                     }
                 }
@@ -12127,8 +12051,9 @@ service cloud.firestore {
                 // الحصول على originalType من attribute إذا تم تحديثه
                 const finalOriginalType = leaveTypeSelect.getAttribute('data-original-type') || originalType;
                 
-                // تحديد حالة التحويل: فقط إذا كان النوع الأصلي شهرية أو زمنية والنوع الحالي بدون راتب
-                const convertedFromMonthly = (finalOriginalType === 'monthly' && type === 'unpaid') || (finalOriginalType === 'hourly' && type === 'unpaid');
+                // تحديد حالة التحويل: شهرية→بدون راتب، أو زمنية بدون راتب (isUnpaidHourly)
+                const isUnpaidHourly = leaveTypeSelect.getAttribute('data-is-unpaid-hourly') === 'true';
+                const convertedFromMonthly = (finalOriginalType === 'monthly' && type === 'unpaid') || (finalOriginalType === 'hourly' && (type === 'unpaid' || isUnpaidHourly));
                 
                 // التحقق من صحة البيانات قبل الحفظ
                 if (!finalOriginalType) {
@@ -12166,6 +12091,7 @@ service cloud.firestore {
                     employeeId: employeeId,
                     type: type,
                     originalType: finalOriginalType, // النوع الأصلي قبل التحويل (محدث بعد التحويل)
+                    isUnpaidHourly: (type === 'hourly' && isUnpaidHourly) || false, // إجازة زمنية بدون راتب (رصيد منتهٍ)
                     convertedFromMonthly: convertedFromMonthly, // هل تم تحويلها من شهرية أو زمنية؟
                     calculateDeduction: calculateDeduction, // هل يتم احتساب خصم مالي؟
                     salaryAtLeaveDate: salaryAtLeaveDate, // الراتب الحالي عند إضافة الإجازة
@@ -14293,6 +14219,13 @@ service cloud.firestore {
             // انتظار تحميل الصور ثم الطباعة
             setTimeout(() => {
                 printWindow.print();
+                // بعد الطباعة: مسح بيانات تسجيل الدخول وعرض نافذة تسجيل الدخول فارغة
+                try {
+                    localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remember_me');
+                    sessionStorage.removeItem('hrm_manual_logout');
+                } catch (e) {}
+                if (typeof showLogin === 'function') showLogin();
             }, 500);
         }
 
@@ -14368,6 +14301,13 @@ service cloud.firestore {
                 const dateStr = new Date().toISOString().split('T')[0];
                 XLSX.writeFile(workbook, `${fileName}_${dateStr}.xlsx`);
                 alert('✅ تم تصدير التقرير بنجاح!');
+                // مسح بيانات تسجيل الدخول المحفوظة وعرض نافذة تسجيل الدخول فارغة
+                try {
+                    localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remember_me');
+                    sessionStorage.removeItem('hrm_manual_logout');
+                } catch (e) {}
+                if (typeof showLogin === 'function') showLogin();
             } catch (error) {
                 console.error('خطأ في تصدير Excel:', error);
                 alert('❌ حدث خطأ أثناء تصدير التقرير: ' + error.message);
