@@ -2042,15 +2042,15 @@
             
             <div id="loginError" class="login-error"></div>
             
-            <form id="loginForm" onsubmit="handleLogin(event)">
+            <form id="loginForm" onsubmit="handleLogin(event)" autocomplete="off">
                 <div class="login-form-group">
                     <label>البريد الإلكتروني:</label>
-                    <input type="email" id="loginEmail" placeholder="أدخل البريد الإلكتروني" required autocomplete="email">
+                    <input type="email" id="loginEmail" placeholder="أدخل البريد الإلكتروني" required autocomplete="off">
                 </div>
                 
                 <div class="login-form-group">
                     <label>كلمة المرور:</label>
-                    <input type="password" id="loginPassword" placeholder="أدخل كلمة المرور" required autocomplete="current-password">
+                    <input type="password" id="loginPassword" placeholder="أدخل كلمة المرور" required autocomplete="off">
                 </div>
                 
                 <div class="login-remember">
@@ -2337,6 +2337,16 @@
 
                 <!-- البحث والفلترة -->
                 <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <!-- تنقل الأشهر -->
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <span style="font-weight: bold; color: #667eea;">عرض إجازات:</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button type="button" class="btn btn-secondary" onclick="navigateLeavesMonth(-1)" style="padding: 6px 12px; font-size: 14px;" title="الشهر السابق">◀</button>
+                            <span id="leavesMonthLabel" style="min-width: 120px; font-weight: bold; text-align: center;">يناير 2025</span>
+                            <button type="button" class="btn btn-secondary" onclick="navigateLeavesMonth(1)" style="padding: 6px 12px; font-size: 14px;" title="الشهر التالي">▶</button>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="leavesViewAllBtn" onclick="setLeavesViewAll()" style="padding: 6px 15px; font-size: 14px;">عرض كل الإجازات</button>
+                    </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div class="form-group" style="margin: 0;">
                             <label>البحث:</label>
@@ -3682,6 +3692,9 @@
         window.evaluationViewUnlocked = false; // حالة فتح عرض التقييمات
         window.usersSectionUnlocked = false; // حالة فتح قسم المستخدمين
         let currentUser = null;
+        // بيانات المستخدم الأول (لا تُحفظ في "تذكرني" لضمان أن كل زائر يسجّل دخوله بنفسه)
+        const FIRST_USER_EMAIL = 'ali.alqadre93@gmail.com';
+        const FIRST_USER_PASSWORD = '9875321';
         // #region agent log
         let isManualLogout = false; // علامة لتتبع تسجيل الخروج اليدوي
         // استعادة حالة تسجيل الخروج من sessionStorage
@@ -3700,6 +3713,9 @@
         // #endregion
         let employeesData = [];
         let leavesData = [];
+        let leavesViewYear = new Date().getFullYear();
+        let leavesViewMonth = new Date().getMonth(); // 0-11
+        let leavesViewAllMonths = false; // true = عرض كل الإجازات، false = عرض شهر محدد
         let auditLogs = []; // سجل التعديلات
         
         // نظام الترجمة
@@ -4105,6 +4121,11 @@
                 loadProjects(); // تحميل المشاريع لعرضها في القائمة
                 loadEmployees(); // تحميل الموظفين لحساب العدد
             } else if (sectionId === 'leaves') {
+                leavesViewAllMonths = false;
+                const now = new Date();
+                leavesViewYear = now.getFullYear();
+                leavesViewMonth = now.getMonth();
+                updateLeavesMonthLabel();
                 loadLeaves();
             } else if (sectionId === 'reports') {
                 // تحميل البيانات للتقارير (غير متزامن)
@@ -9586,19 +9607,25 @@
                 // التأكد من وجود سجل المستخدم في Firestore
                 await ensureUserRecordExists(currentUser);
                 
-                // حفظ بيانات تسجيل الدخول إذا تم اختيار "تذكرني"
+                // حفظ بيانات تسجيل الدخول إذا تم اختيار "تذكرني" (ما عدا المستخدم الأول لضمان أن كل زائر يسجّل دخوله بنفسه)
                 if (rememberMe) {
                     try {
-                        // حفظ البريد الإلكتروني فقط (لا نحفظ كلمة المرور)
-                        localStorage.setItem('hrm_remembered_email', email);
-                        localStorage.setItem('hrm_remember_me', 'true');
-                        console.log('✅ تم حفظ البريد الإلكتروني للجلسة القادمة');
+                        if (email !== FIRST_USER_EMAIL) {
+                            localStorage.setItem('hrm_remembered_email', email);
+                            localStorage.setItem('hrm_remembered_password', password);
+                            localStorage.setItem('hrm_remember_me', 'true');
+                            console.log('✅ تم حفظ البريد وكلمة المرور للجلسة القادمة');
+                        } else {
+                            localStorage.removeItem('hrm_remembered_email');
+                            localStorage.removeItem('hrm_remembered_password');
+                            localStorage.setItem('hrm_remember_me', 'true');
+                        }
                     } catch (storageError) {
                         console.warn('⚠️ لا يمكن حفظ بيانات تسجيل الدخول:', storageError);
                     }
                 } else {
-                    // حذف البيانات المحفوظة إذا لم يتم اختيار "تذكرني"
                     localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remembered_password');
                     localStorage.removeItem('hrm_remember_me');
                 }
                 
@@ -9700,8 +9727,18 @@
             if (loginScreen) loginScreen.classList.remove('hidden');
             if (app) app.classList.add('hidden');
             
-            // تحميل البريد الإلكتروني المحفوظ إذا كان "تذكرني" مفعّل
-            const rememberedEmail = localStorage.getItem('hrm_remembered_email');
+            // تحميل البريد وكلمة المرور المحفوظين إذا كان "تذكرني" مفعّل (مع منع عرض بيانات المستخدم الأول)
+            let rememberedEmail = localStorage.getItem('hrm_remembered_email');
+            let rememberedPassword = localStorage.getItem('hrm_remembered_password');
+            if (rememberedEmail === FIRST_USER_EMAIL || rememberedPassword === FIRST_USER_PASSWORD) {
+                rememberedEmail = '';
+                rememberedPassword = '';
+                try {
+                    localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remembered_password');
+                    localStorage.removeItem('hrm_remember_me');
+                } catch (e) {}
+            }
             const rememberMe = localStorage.getItem('hrm_remember_me') === 'true';
             const loginEmail = document.getElementById('loginEmail');
             const loginPassword = document.getElementById('loginPassword');
@@ -9715,7 +9752,9 @@
                     loginEmail.value = '';
                 }
             }
-            if (loginPassword) loginPassword.value = '';
+            if (loginPassword) {
+                loginPassword.value = (rememberMe && rememberedPassword) ? rememberedPassword : '';
+            }
             if (rememberMeCheckbox) rememberMeCheckbox.checked = rememberMe;
             if (loginError) loginError.classList.remove('show');
             
@@ -10643,8 +10682,8 @@ service cloud.firestore {
                     return;
                 }
 
-                const firstUserEmail = 'ali.alqadre93@gmail.com';
-                const firstUserPassword = '9875321';
+                const firstUserEmail = FIRST_USER_EMAIL;
+                const firstUserPassword = FIRST_USER_PASSWORD;
                 
                 // التحقق من وجود المستخدم الأول بالبريد الإلكتروني
                 // أولاً: محاولة التحقق من Firestore
@@ -11026,8 +11065,11 @@ service cloud.firestore {
                 return;
             }
 
+            // فلترة حسب الشهر (إذا لم يكن "عرض كل الإجازات" مفعّلاً)
+            let leavesToShow = leavesViewAllMonths ? leavesData : leavesData.filter(l => leaveOverlapsMonth(l, leavesViewYear, leavesViewMonth));
+
             // ترتيب الإجازات من الأحدث إلى الأقدم حسب التاريخ
-            const sortedLeaves = [...leavesData].sort((a, b) => {
+            const sortedLeaves = [...leavesToShow].sort((a, b) => {
                 // استخدام تاريخ البداية للترتيب
                 const dateA = a.startDate ? new Date(a.startDate) : new Date(0);
                 const dateB = b.startDate ? new Date(b.startDate) : new Date(0);
@@ -11122,20 +11164,72 @@ service cloud.firestore {
             }).join('');
         }
 
+        // التحقق من تداخل الإجازة مع شهر محدد
+        function leaveOverlapsMonth(leave, year, month) {
+            const monthStart = new Date(year, month, 1);
+            const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
+            const start = leave.startDate ? new Date(leave.startDate) : null;
+            const end = (leave.endDate ? new Date(leave.endDate) : start) || start;
+            if (!start || isNaN(start.getTime())) return false;
+            return start <= monthEnd && (end || start) >= monthStart;
+        }
+
+        // الحصول على عرض اسم الشهر بالعربية
+        function getLeavesMonthLabel(year, month) {
+            const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+            return months[month] + ' ' + year;
+        }
+
+        // تحديث عرض الشهر في الواجهة
+        function updateLeavesMonthLabel() {
+            const labelEl = document.getElementById('leavesMonthLabel');
+            const allBtn = document.getElementById('leavesViewAllBtn');
+            if (labelEl) labelEl.textContent = leavesViewAllMonths ? 'كل الأشهر' : getLeavesMonthLabel(leavesViewYear, leavesViewMonth);
+            if (allBtn) allBtn.textContent = leavesViewAllMonths ? 'العودة للشهر الحالي' : 'عرض كل الإجازات';
+        }
+
+        // التنقل بين الأشهر (-1 للسابق، 1 للتالي)
+        function navigateLeavesMonth(delta) {
+            leavesViewAllMonths = false;
+            leavesViewMonth += delta;
+            if (leavesViewMonth < 0) {
+                leavesViewMonth = 11;
+                leavesViewYear--;
+            } else if (leavesViewMonth > 11) {
+                leavesViewMonth = 0;
+                leavesViewYear++;
+            }
+            updateLeavesMonthLabel();
+            filterLeaves();
+        }
+
+        // عرض كل الإجازات
+        function setLeavesViewAll() {
+            leavesViewAllMonths = !leavesViewAllMonths;
+            if (!leavesViewAllMonths) {
+                const now = new Date();
+                leavesViewYear = now.getFullYear();
+                leavesViewMonth = now.getMonth();
+            }
+            updateLeavesMonthLabel();
+            filterLeaves();
+        }
+
         function filterLeaves() {
             const search = document.getElementById('leaveSearch').value.toLowerCase();
             const typeFilter = document.getElementById('leaveTypeFilter').value;
             const statusFilter = document.getElementById('leaveStatusFilter').value;
 
-            const filtered = leavesData.filter(leave => {
+            let filtered = leavesData.filter(leave => {
                 const employee = employeesData.find(e => e.id === leave.employeeId);
                 const employeeName = employee ? employee.name.toLowerCase() : '';
                 
                 const matchSearch = !search || employeeName.includes(search);
                 const matchType = !typeFilter || leave.type === typeFilter;
                 const matchStatus = !statusFilter || (leave.status || 'pending') === statusFilter;
+                const matchMonth = leavesViewAllMonths || leaveOverlapsMonth(leave, leavesViewYear, leavesViewMonth);
                 
-                return matchSearch && matchType && matchStatus;
+                return matchSearch && matchType && matchStatus && matchMonth;
             });
 
             // ترتيب الإجازات المفلترة من الأحدث إلى الأقدم حسب التاريخ
@@ -11247,12 +11341,21 @@ service cloud.firestore {
             document.getElementById('leaveSearch').value = '';
             document.getElementById('leaveTypeFilter').value = '';
             document.getElementById('leaveStatusFilter').value = '';
+            leavesViewAllMonths = false;
+            const now = new Date();
+            leavesViewYear = now.getFullYear();
+            leavesViewMonth = now.getMonth();
+            updateLeavesMonthLabel();
             displayLeaves();
             updateLeavesCount();
         }
 
         function updateLeavesCount() {
-            document.getElementById('leavesCount').textContent = `إجمالي الإجازات: ${leavesData.length}`;
+            const count = leavesViewAllMonths 
+                ? leavesData.length 
+                : leavesData.filter(l => leaveOverlapsMonth(l, leavesViewYear, leavesViewMonth)).length;
+            const countEl = document.getElementById('leavesCount');
+            if (countEl) countEl.textContent = `إجمالي الإجازات: ${count}`;
         }
 
         async function showAddLeaveForm() {
@@ -14222,6 +14325,7 @@ service cloud.firestore {
                 // بعد الطباعة: مسح بيانات تسجيل الدخول وعرض نافذة تسجيل الدخول فارغة
                 try {
                     localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remembered_password');
                     localStorage.removeItem('hrm_remember_me');
                     sessionStorage.removeItem('hrm_manual_logout');
                 } catch (e) {}
@@ -14304,6 +14408,7 @@ service cloud.firestore {
                 // مسح بيانات تسجيل الدخول المحفوظة وعرض نافذة تسجيل الدخول فارغة
                 try {
                     localStorage.removeItem('hrm_remembered_email');
+                    localStorage.removeItem('hrm_remembered_password');
                     localStorage.removeItem('hrm_remember_me');
                     sessionStorage.removeItem('hrm_manual_logout');
                 } catch (e) {}
