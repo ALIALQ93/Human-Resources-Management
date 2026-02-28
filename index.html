@@ -11729,6 +11729,12 @@ service cloud.firestore {
                     }
                 }
             }
+            // إذا كانت إجازة زمنية وطريقة الإدخال "نطاق زمني" → حفظ فترة واحدة
+            if (type === 'hourly' && hoursInputMethod === 'time-range') {
+                const st = document.getElementById('leaveStartTime')?.value;
+                const et = document.getElementById('leaveEndTime')?.value;
+                if (st && et) timeRanges = [{ startTime: st, endTime: et }];
+            }
             
             const status = document.getElementById('leaveStatus').value || 'pending';
             const notes = document.getElementById('leaveNotes').value.trim();
@@ -12008,10 +12014,22 @@ service cloud.firestore {
                 // الحصول على الموظف للحصول على معلومات الراتب
                 const employee = employeesData.find(e => e.id === employeeId);
                 
+                let newLeaveTimeInfo = null;
+                if (type === 'hourly' && timeRanges && timeRanges.length > 0) {
+                    newLeaveTimeInfo = { kind: 'hourly', timeRanges: timeRanges };
+                } else if (type === 'work-mission') {
+                    const mt = document.getElementById('leaveMissionType')?.value;
+                    if (mt === 'hourly') {
+                        const ms = document.getElementById('leaveMissionStartTime')?.value;
+                        const me = document.getElementById('leaveMissionEndTime')?.value;
+                        if (ms && me) newLeaveTimeInfo = { kind: 'mission', missionStartTime: ms, missionEndTime: me };
+                    }
+                }
+                
                 // إذا كان يجب تقسيم الإجازة (شهرية أو زمنية)
                 if (shouldSplitMonthlyLeave || shouldSplitLeave) {
                     // التحقق من عدم تكرار الإجازات لنفس الموظف في نفس الفترة
-                    const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, null);
+                    const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, null, newLeaveTimeInfo);
                     if (hasOverlap) {
                         alert('⚠️ يوجد إجازة أخرى للموظف في نفس الفترة الزمنية. الرجاء التحقق من التواريخ.');
                         return;
@@ -12143,8 +12161,8 @@ service cloud.firestore {
                 }
                 
                 // الحالة العادية: إجازة واحدة (غير مقسمة)
-                // التحقق من عدم تكرار الإجازات لنفس الموظف في نفس الفترة
-                const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, null);
+                // التحقق من عدم تكرار الإجازات لنفس الموظف في نفس الفترة (مع دعم إجازة زمنية + مهمة في نفس اليوم بدون تداخل ساعات)
+                const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, null, newLeaveTimeInfo);
                 if (hasOverlap) {
                     alert('⚠️ يوجد إجازة أخرى للموظف في نفس الفترة الزمنية. الرجاء التحقق من التواريخ.');
                     return;
@@ -12202,6 +12220,8 @@ service cloud.firestore {
                     regionId: (type === 'work-mission') ? (document.getElementById('leaveRegionId')?.value || null) : null, // المنطقة لمهمة العمل
                     missionType: missionType, // نوع المهمة (زمنية أو يوم كامل)
                     missionHours: missionHours, // عدد ساعات المهمة إذا كانت زمنية
+                    missionStartTime: (type === 'work-mission' && missionType === 'hourly') ? (document.getElementById('leaveMissionStartTime')?.value || null) : null,
+                    missionEndTime: (type === 'work-mission' && missionType === 'hourly') ? (document.getElementById('leaveMissionEndTime')?.value || null) : null,
                     startDate: startDate,
                     endDate: (type === 'hourly' || (type === 'work-mission' && missionType === 'hourly')) ? null : (endDate || null), // الإجازات الزمنية ومهام العمل الزمنية لا تحتاج endDate
                     hours: type === 'hourly' ? parseFloat(hours) : null,
@@ -12568,6 +12588,14 @@ service cloud.firestore {
                 if (leaveMissionHoursInput && leave.missionHours) {
                     leaveMissionHoursInput.value = leave.missionHours;
                 }
+                const leaveMissionStartTimeEl = document.getElementById('leaveMissionStartTime');
+                const leaveMissionEndTimeEl = document.getElementById('leaveMissionEndTime');
+                if (leave.missionStartTime && leave.missionEndTime) {
+                    const methodEl = document.getElementById('leaveMissionHoursInputMethod');
+                    if (methodEl) { methodEl.value = 'time-range'; handleMissionHoursMethodChange(); }
+                    if (leaveMissionStartTimeEl) leaveMissionStartTimeEl.value = leave.missionStartTime;
+                    if (leaveMissionEndTimeEl) leaveMissionEndTimeEl.value = leave.missionEndTime;
+                }
             } else {
                 if (leaveHoursGroup) leaveHoursGroup.style.display = 'none';
                 if (leaveDeductionGroup) leaveDeductionGroup.style.display = 'none';
@@ -12672,6 +12700,11 @@ service cloud.firestore {
                         return;
                     }
                 }
+            }
+            if (type === 'hourly' && hoursInputMethod === 'time-range') {
+                const st = document.getElementById('leaveStartTime')?.value;
+                const et = document.getElementById('leaveEndTime')?.value;
+                if (st && et) timeRanges = [{ startTime: st, endTime: et }];
             }
             
             const status = document.getElementById('leaveStatus').value || 'pending';
@@ -12792,7 +12825,18 @@ service cloud.firestore {
                 console.log('🔍 [DEBUG-LEAVE-UPDATE] قبل التحقق من التضارب - إجازات أخرى للموظف:', beforeOverlapCheck);
                 // #endregion
                 
-                const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, editingLeaveId);
+                let newLeaveTimeInfo = null;
+                if (type === 'hourly' && timeRanges && timeRanges.length > 0) {
+                    newLeaveTimeInfo = { kind: 'hourly', timeRanges: timeRanges };
+                } else if (type === 'work-mission') {
+                    const mt = document.getElementById('leaveMissionType')?.value;
+                    if (mt === 'hourly') {
+                        const ms = document.getElementById('leaveMissionStartTime')?.value;
+                        const me = document.getElementById('leaveMissionEndTime')?.value;
+                        if (ms && me) newLeaveTimeInfo = { kind: 'mission', missionStartTime: ms, missionEndTime: me };
+                    }
+                }
+                const hasOverlap = checkLeaveOverlap(employeeId, startDate, endDate, type, editingLeaveId, newLeaveTimeInfo);
                 
                 // #region agent log
                 fetch('http://127.0.0.1:7242/ingest/92a107bc-3396-4b6c-a6d6-34a2cf7f1b41',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Human Resources Management.html:9613',message:'updateLeave() - نتيجة التحقق من التضارب',data:{editingLeaveId:editingLeaveId,hasOverlap:hasOverlap},timestamp:Date.now(),sessionId:sessionId,runId:runId,hypothesisId:'B'})}).catch(()=>{});
@@ -12884,6 +12928,8 @@ service cloud.firestore {
                     regionId: (type === 'work-mission') ? (document.getElementById('leaveRegionId')?.value || null) : null, // المنطقة لمهمة العمل
                     missionType: missionType, // نوع المهمة (زمنية أو يوم كامل)
                     missionHours: missionHours, // عدد ساعات المهمة إذا كانت زمنية
+                    missionStartTime: (type === 'work-mission' && missionType === 'hourly') ? (document.getElementById('leaveMissionStartTime')?.value || null) : null,
+                    missionEndTime: (type === 'work-mission' && missionType === 'hourly') ? (document.getElementById('leaveMissionEndTime')?.value || null) : null,
                     startDate: startDate,
                     endDate: (type === 'hourly' || (type === 'work-mission' && missionType === 'hourly')) ? null : (endDate || null), // الإجازات الزمنية ومهام العمل الزمنية لا تحتاج endDate
                     hours: type === 'hourly' ? parseFloat(hours) : null,
@@ -12998,8 +13044,21 @@ service cloud.firestore {
             return types[type] || type;
         }
 
-        // التحقق من تداخل الإجازات لنفس الموظف
-        function checkLeaveOverlap(employeeId, startDate, endDate, type, excludeLeaveId = null) {
+        // التحقق من تداخل فترتين زمنيتين (صيغة HH:mm)
+        function timeRangesOverlap(rangesA, rangesB) {
+            if (!rangesA || !rangesB || rangesA.length === 0 || rangesB.length === 0) return true; // عدم وجود أوقات = اعتبار تداخل
+            for (const a of rangesA) {
+                for (const b of rangesB) {
+                    const startA = a.startTime || '00:00', endA = a.endTime || '23:59';
+                    const startB = b.startTime || '00:00', endB = b.endTime || '23:59';
+                    if (startA < endB && endA > startB) return true;
+                }
+            }
+            return false;
+        }
+
+        // التحقق من تداخل الإجازات لنفس الموظف (يدعم إجازة زمنية + مهمة في نفس اليوم مع منع تداخل الساعات)
+        function checkLeaveOverlap(employeeId, startDate, endDate, type, excludeLeaveId = null, newLeaveTimeInfo = null) {
             // #region agent log
             const sessionId = 'debug-session-' + Date.now();
             const runId = 'run1';
@@ -13014,89 +13073,86 @@ service cloud.firestore {
             const newStart = new Date(startDate);
             newStart.setHours(0, 0, 0, 0);
             
-            // للإجازات الزمنية، نستخدم نفس التاريخ كتاريخ بداية ونهاية
+            // للإجازات الزمنية ومهمة عمل زمنية، نستخدم نفس التاريخ كتاريخ بداية ونهاية
             let newEnd = null;
-            if (type === 'hourly') {
+            if (type === 'hourly' || (type === 'work-mission' && newLeaveTimeInfo?.kind === 'mission')) {
                 newEnd = new Date(startDate);
                 newEnd.setHours(23, 59, 59, 999);
             } else if (endDate) {
                 newEnd = new Date(endDate);
                 newEnd.setHours(23, 59, 59, 999);
             } else {
-                // للإجازات بدون راتب بدون تاريخ انتهاء، نستخدم تاريخ البداية فقط
                 newEnd = new Date(startDate);
                 newEnd.setHours(23, 59, 59, 999);
             }
             
-            // البحث عن إجازات متداخلة لنفس الموظف
             const allEmployeeLeaves = leavesData.filter(l => l.employeeId === employeeId);
             const validLeaves = allEmployeeLeaves.filter(l => l.status !== 'rejected' && l.status !== 'cancelled' && l.startDate);
             
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/92a107bc-3396-4b6c-a6d6-34a2cf7f1b41',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Human Resources Management.html:9775',message:'checkLeaveOverlap() - قبل الفلترة',data:{employeeId:employeeId,allEmployeeLeavesCount:allEmployeeLeaves.length,validLeavesCount:validLeaves.length,excludeLeaveId:excludeLeaveId},timestamp:Date.now(),sessionId:sessionId,runId:runId,hypothesisId:'B'})}).catch(()=>{});
-            console.log('🔍 [DEBUG-LEAVE-OVERLAP] إجازات الموظف:', {all: allEmployeeLeaves.length, valid: validLeaves.length});
-            // #endregion
+            const isNewSameDayType = type === 'hourly' || (type === 'work-mission' && newLeaveTimeInfo?.kind === 'mission');
+            
+            function getNewTimeRanges() {
+                if (!newLeaveTimeInfo) return null;
+                if (newLeaveTimeInfo.kind === 'hourly' && newLeaveTimeInfo.timeRanges && newLeaveTimeInfo.timeRanges.length > 0)
+                    return newLeaveTimeInfo.timeRanges;
+                if (newLeaveTimeInfo.kind === 'mission' && newLeaveTimeInfo.missionStartTime && newLeaveTimeInfo.missionEndTime)
+                    return [{ startTime: newLeaveTimeInfo.missionStartTime, endTime: newLeaveTimeInfo.missionEndTime }];
+                return null;
+            }
+            
+            function getExistingTimeRanges(leave) {
+                if (leave.type === 'hourly' && leave.timeRanges && leave.timeRanges.length > 0)
+                    return leave.timeRanges;
+                if (leave.type === 'work-mission' && leave.missionType === 'hourly' && leave.missionStartTime && leave.missionEndTime)
+                    return [{ startTime: leave.missionStartTime, endTime: leave.missionEndTime }];
+                return null;
+            }
             
             const overlappingLeaves = validLeaves.filter(leave => {
-                // استثناء الإجازة الحالية عند التعديل
-                if (excludeLeaveId && leave.id === excludeLeaveId) {
-                    return false;
-                }
-                
-                if (!leave.startDate) {
-                    return false;
-                }
+                if (excludeLeaveId && leave.id === excludeLeaveId) return false;
+                if (!leave.startDate) return false;
                 
                 const existingStart = new Date(leave.startDate);
                 existingStart.setHours(0, 0, 0, 0);
-                
                 let existingEnd = null;
-                if (leave.type === 'hourly') {
-                    // الإجازات الزمنية: نفس التاريخ
+                if (leave.type === 'hourly' || (leave.type === 'work-mission' && leave.missionType === 'hourly')) {
                     existingEnd = new Date(leave.startDate);
                     existingEnd.setHours(23, 59, 59, 999);
                 } else if (leave.endDate) {
                     existingEnd = new Date(leave.endDate);
                     existingEnd.setHours(23, 59, 59, 999);
                 } else {
-                    // بدون تاريخ انتهاء: نفس تاريخ البداية
                     existingEnd = new Date(leave.startDate);
                     existingEnd.setHours(23, 59, 59, 999);
                 }
                 
-                // التحقق من التداخل: الإجازة الجديدة تتداخل مع الإجازة الموجودة
-                // التداخل يحدث إذا:
-                // 1. تاريخ بداية الإجازة الجديدة يقع ضمن فترة الإجازة الموجودة
-                // 2. تاريخ نهاية الإجازة الجديدة يقع ضمن فترة الإجازة الموجودة
-                // 3. الإجازة الجديدة تحتوي على الإجازة الموجودة بالكامل
-                // 4. الإجازة الموجودة تحتوي على الإجازة الجديدة بالكامل
-                const overlap = (
+                const dateOverlap = (
                     (newStart >= existingStart && newStart <= existingEnd) ||
                     (newEnd >= existingStart && newEnd <= existingEnd) ||
                     (newStart <= existingStart && newEnd >= existingEnd) ||
                     (existingStart <= newStart && existingEnd >= newEnd)
                 );
                 
-                // #region agent log
-                if (overlap) {
-                    fetch('http://127.0.0.1:7242/ingest/92a107bc-3396-4b6c-a6d6-34a2cf7f1b41',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Human Resources Management.html:9819',message:'checkLeaveOverlap() - تم العثور على تداخل',data:{leaveId:leave.id,leaveType:leave.type,leaveStartDate:leave.startDate,leaveEndDate:leave.endDate,newStartDate:startDate,newEndDate:endDate,excludeLeaveId:excludeLeaveId},timestamp:Date.now(),sessionId:sessionId,runId:runId,hypothesisId:'B'})}).catch(()=>{});
-                    console.log('🔍 [DEBUG-LEAVE-OVERLAP] تداخل مع إجازة:', {leaveId: leave.id, leaveType: leave.type, leaveStart: leave.startDate, leaveEnd: leave.endDate});
-                }
-                // #endregion
+                if (!dateOverlap) return false;
                 
-                return overlap;
+                const isExistingSameDayType = leave.type === 'hourly' || (leave.type === 'work-mission' && leave.missionType === 'hourly');
+                const sameDate = newStart.getTime() === existingStart.getTime();
+                
+                if (isNewSameDayType && isExistingSameDayType && sameDate) {
+                    const newRanges = getNewTimeRanges();
+                    const existingRanges = getExistingTimeRanges(leave);
+                    if (newRanges && existingRanges) {
+                        return timeRangesOverlap(newRanges, existingRanges);
+                    }
+                    return true;
+                }
+                return true;
             });
-            
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/92a107bc-3396-4b6c-a6d6-34a2cf7f1b41',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Human Resources Management.html:9829',message:'checkLeaveOverlap() - نتيجة التحقق',data:{employeeId:employeeId,overlappingLeavesCount:overlappingLeaves.length,overlappingLeavesIds:overlappingLeaves.map(l=>l.id),excludeLeaveId:excludeLeaveId},timestamp:Date.now(),sessionId:sessionId,runId:runId,hypothesisId:'B'})}).catch(()=>{});
-            console.log('🔍 [DEBUG-LEAVE-OVERLAP] عدد الإجازات المتداخلة:', overlappingLeaves.length, overlappingLeaves.map(l => l.id));
-            // #endregion
             
             if (overlappingLeaves.length > 0) {
                 console.warn('⚠️ تم العثور على إجازات متداخلة:', overlappingLeaves);
                 return true;
             }
-            
             return false;
         }
 
